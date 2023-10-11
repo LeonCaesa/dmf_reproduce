@@ -1,0 +1,9 @@
+*.zip
+.Rhistory
+*.RData
+*.csv
+*.sh.o*
+*.png
+*.jpeg
+*.jpg
+.Rproj.user/
