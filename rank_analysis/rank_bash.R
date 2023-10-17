@@ -34,8 +34,8 @@ ratio_agg_case = data.frame(matrix( nrow = 0, ncol = length(ratio_names))); coln
 save_dir = NULL
 save_dir = paste(save_dir, paste(n,p, sep = '_'), sep = '/')
 #dir.create(save_dir)
-save_name = paste('Rank', case, '_addcorrect.RData', sep = '')
-save_ratio = paste('Ratio', case, '_addcorrect.RData', sep = '')
+save_name = paste('Rank', case, '_expname.RData', sep = '')
+save_ratio = paste('Ratio', case, '_expname.RData', sep = '')
 
 
 
