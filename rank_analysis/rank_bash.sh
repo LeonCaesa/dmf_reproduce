@@ -16,14 +16,14 @@ for case in "Case1" "Case2" "Case3" "Case4"
 do
   q_star=6
   q_max=$((p-5))
-  Rscript ./rankbash.R ${nsim} ${case} ${n} ${p} ${q_star} ${q_max}
+  Rscript ./rank_bash.R ${nsim} ${case} ${n} ${p} ${q_star} ${q_max}
 done
 
 for case in "Case5" "Case6"
 do
   q_star=15
   q_max=$((p-5))
-  Rscript ./rankbash.R ${nsim} ${case} ${n} ${p} ${q_star} ${q_max}
+  Rscript ./rank_bash.R ${nsim} ${case} ${n} ${p} ${q_star} ${q_max}
 done
 end=`date +%s`
 
@@ -31,4 +31,4 @@ runtime=$((end-start))
 
 echo ${runtime}
 
-
+# example run: Rscript ./rank_bash.R 1 'Case4' 500 50 6 45

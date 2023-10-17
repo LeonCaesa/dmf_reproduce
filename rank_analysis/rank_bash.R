@@ -1,5 +1,5 @@
-setwd('/projectnb2/dmfgrp/dmf_revision/')
 if(!exists("foo", mode="function")) source("../dmf/R/dmf.R")
+if(!exists("foo", mode="function")) source("./rank_utils.R")
 library(MASS)
 
 
@@ -18,7 +18,7 @@ if (length(argv) > 0){
 
 
 #
-repeats = 30
+repeats = 50
 phi = 2
 family_list = c()
 family_list[[1]] = negative.binomial(phi)
@@ -36,9 +36,9 @@ ratio_agg_case = data.frame(matrix( nrow = 0, ncol = length(ratio_names))); coln
 
 
 
-save_dir = '/projectnb/dmfgrp/dmf_revision/rank_result'
+save_dir = NULL
 save_dir = paste(save_dir, paste(n,p, sep = '_'), sep = '/')
-dir.create(save_dir)
+#dir.create(save_dir)
 save_name = paste('Rank', case, '_addcorrect.RData', sep = '')
 save_ratio = paste('Ratio', case, '_addcorrect.RData', sep = '')
 
@@ -46,12 +46,12 @@ save_ratio = paste('Ratio', case, '_addcorrect.RData', sep = '')
 
 if (!file.exists(paste(save_dir, save_name, sep = '/'))){
 
-  paste("Number of Simulations:",repeats)
-  paste("Case Num:",case)
-  paste("n:",n)
-  paste("p:",p)
-  paste("q_star:",q_star)
-  paste("q_max:",q_max)
+  print(paste("Number of Simulations:",repeats))
+  print(paste("Case Num:",case))
+  print(paste("n:",n))
+  print(paste("p:",p))
+  print(paste("q_star:",q_star))
+  print(paste("q_max:",q_max))
 
   start = Sys.time()
 for (family_index in 1:length(family_list)){
@@ -63,14 +63,14 @@ for (family_index in 1:length(family_list)){
     temp_onatski = rep(0,repeats)
     for (iter in 1:repeats){
       #print(iter)
-      temp_rank = rank_simu(p, q_star, n, phi, glm_family, q_max = q_max, case = case)
-      temp_act[iter] = temp_rank$q_act
-      temp_onatski[iter] = temp_rank$q_onaski
-      ratio_agg_case[nrow(ratio_agg_case)+1, ] = c(temp_rank$ratio_, case, iter)
+      rank_result <- rank_simu(p, q_star, n, phi, glm_family, q_max = q_max, case = case)
+      temp_act[iter] <- rank_result$q_act
+      temp_onatski[iter] <- rank_result$q_onaski
+      ratio_agg_case[nrow(ratio_agg_case) + 1, ] <- c(rank_result$ratio_, case, iter)
     }
 
-    act_agg_act[family_index,] = temp_act
-    act_agg_onatski[family_index,] = temp_onatski
+    act_agg_act[family_index,] <- temp_act
+    act_agg_onatski[family_index,] <- temp_onatski
 
 
     print(mean(temp_act))
@@ -79,9 +79,9 @@ for (family_index in 1:length(family_list)){
 end = Sys.time()
 
 # [saving results]
-rank_table = data.frame(rbind(t(act_agg_act), t(act_agg_onatski)))
-rank_table$label = factor(c(rep('ACT', repeats), rep('Onatski', repeats)))
-colnames(rank_table) = c('Negbin(log)', 'Gaussian(identity)', 'Possion(log)', 'Poisson(sqrt)', 'Gamma(log)', 'Binomial(probit)', 'Binomial(logit)', 'label')
-save(rank_table, file = paste(save_dir, save_name, sep = '/'))
-save(ratio_agg_case,  file = paste(save_dir, save_ratio, sep = '/'))
+rank_table <- data.frame(rbind(t(act_agg_act), t(act_agg_onatski)))
+rank_table$label <- factor(c(rep('ACT', repeats), rep('Onatski', repeats)))
+colnames(rank_table) <- c('Negbin(log)', 'Gaussian(identity)', 'Possion(log)', 'Poisson(sqrt)', 'Gamma(log)', 'Binomial(probit)', 'Binomial(logit)', 'label')
+#save(rank_table, file = paste(save_dir, save_name, sep = '/'))
+#save(ratio_agg_case,  file = paste(save_dir, save_ratio, sep = '/'))
 }
