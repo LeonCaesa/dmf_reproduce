@@ -24,3 +24,4 @@ end=`date +%s`
 runtime=$((end-start))
 echo " Run time of the script is ${runtime}"
 
+# example run: Rscript ./power_bash.R 500 100 3 0.2  0 100 5 'test'

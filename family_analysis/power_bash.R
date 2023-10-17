@@ -1,7 +1,6 @@
-setwd('/projectnb2/dmfgrp/dmf_revision/')
 library(MASS)
 library(tidyverse)
-source('./dmf/R/dmf.R')
+source('../dmf/R/dmf.R')
 source('./power_util.R')
 
 
@@ -38,7 +37,8 @@ paste("Number of Simulations:",nrepeats)
 paste("add_name:", add_name)
 
 
-save_dir = '/projectnb/dmfgrp/dmf_revision/power_script/power_result'
+#save_dir = '/projectnb/dmfgrp/dmf_revision/power_script/power_result'
+save_dir = NULL
 save_name = paste('n', n,
                   '_p', p,
                   '_q', q_star,
@@ -111,4 +111,4 @@ for (repeats in 1:nrepeats){
   }# end of true_idx
 }# end of repeats
 summary_table = summary_table[-1,]
-save(summary_table, file = save_file)
+#save(summary_table, file = save_file)

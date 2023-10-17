@@ -1,10 +1,9 @@
 if(!exists("foo", mode="function")) source("../dmf/R/dmf.R")
 if(!exists("foo", mode="function")) source('./casestudy_utils.R')
-
 library(MASS)
 library(NMF)
 
-data_dir = '/projectnb2/dmfgrp/dmf_revision/data'
+data_dir = '../data'
 q_hat = 20
 
 
@@ -31,7 +30,7 @@ for (idx in 1:length(factor_families)){
   }else{dmf_fit = dmf(Y/glm_weight, glm_family, q_hat, weights = glm_weight)  }
   dmf_identified = center_identify(dmf_fit)
   if (save_L){save_df = data.frame(cbind(dmf_identified$L, y))}else{save_df = data.frame(cbind(dmf_identified$V, y))}
-  save(save_df, file = paste(save_dir, paste(glm_family$family, '_q', q_hat, '.RData', sep = ''), sep = '/')) 
+  #save(save_df, file = paste(save_dir, paste(glm_family$family, '_q', q_hat, '.RData', sep = ''), sep = '/')) 
 }
 
 
@@ -57,7 +56,7 @@ for (idx in 1:length(factor_families)){
   }else{dmf_fit = dmf(Y/glm_weight, glm_family, q_hat, weights = glm_weight)  }
   dmf_identified = center_identify(dmf_fit)
   if (save_L){save_df = data.frame(cbind(dmf_identified$L, y))}else{save_df = data.frame(cbind(dmf_identified$V, y))}
-  save(save_df, file = paste(save_dir, paste(glm_family$family, '_q', q_hat, '.RData', sep = ''), sep = '/')) 
+  #save(save_df, file = paste(save_dir, paste(glm_family$family, '_q', q_hat, '.RData', sep = ''), sep = '/')) 
 }
 
 
@@ -82,7 +81,7 @@ for (idx in 1:length(factor_families)){
   }else{dmf_fit = dmf(Y/glm_weight, glm_family, q_hat, weights = glm_weight)  }
   dmf_identified = center_identify(dmf_fit)
   if (save_L){save_df = data.frame(cbind(dmf_identified$L, y))}else{save_df = data.frame(cbind(dmf_identified$V, y))}
-  save(save_df, file = paste(save_dir, paste(glm_family$family, '_q', q_hat, '.RData', sep = ''), sep = '/')) 
+  #save(save_df, file = paste(save_dir, paste(glm_family$family, '_q', q_hat, '.RData', sep = ''), sep = '/')) 
 }
 D = diag(rowSums(Y))
 L = D-Y
@@ -90,7 +89,7 @@ D2 = diag(1/sqrt(rowSums(Y)))
 L_sym = tcrossprod(crossprod(D2,L), D2)
 eigen_results = eigen(L_sym)
 save_df = data.frame(cbind(eigen_results$vectors[,(ncol(eigen_results$vectors)-q_hat+1):ncol(eigen_results$vectors)]),y)
-save(save_df, file = paste(save_dir, paste('spectrum', '_q', q_hat, '.RData', sep = ''), sep = '/')) 
+#save(save_df, file = paste(save_dir, paste('spectrum', '_q', q_hat, '.RData', sep = ''), sep = '/')) 
 
 
 
@@ -114,7 +113,7 @@ for (idx in 1:length(factor_families)){
   }else{dmf_fit = dmf(Y/glm_weight, glm_family, q_hat, weights = glm_weight)}
   dmf_identified = center_identify(dmf_fit)
   if (save_L){save_df = data.frame(cbind(dmf_identified$L, y))}else{save_df = data.frame(cbind(dmf_identified$V, y))}
-  save(save_df, file = paste(save_dir, paste(glm_family$family, '_q', q_hat, '.RData', sep = ''), sep = '/')) 
+  #save(save_df, file = paste(save_dir, paste(glm_family$family, '_q', q_hat, '.RData', sep = ''), sep = '/')) 
 }
 
 

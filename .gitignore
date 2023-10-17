@@ -9,3 +9,4 @@
 *.jpeg
 *.jpg
 .Rproj.user/
+!data/*.RData

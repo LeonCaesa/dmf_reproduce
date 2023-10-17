@@ -651,14 +651,14 @@ onatski_rank <- function(x, family, q_max, weights = 1, offset = zeros(x),
   eta <- tcrossprod(fit_result$L, fit_result$V)
   cov_matrix <- cov(eta)
   lambda_hats <- eigen(cov_matrix)$value
-  tol <- 1e3
+  tol <- Inf
   j_update <- q_max + 1
   while (tol>=1){
     j <- j_update
     y_reg <- lambda_hats[j:(j+4)]
     x_reg <- (j + seq(-1, 3, 1))^(2/3)
     delta_temp <- as.numeric(2* abs(coef(lm(y_reg ~ x_reg))))[2]
-    flag <- which((-diff(lambda_hats)>= delta_temp))
+    flag <- which((-diff(lambda_hats) >= delta_temp))
     if(length(flag) == 0){q_hat = 0}else{q_hat <- tail(flag[flag<=q_max],1)}
     j_update <- q_hat + 1
     tol <- abs(j_update -j)
