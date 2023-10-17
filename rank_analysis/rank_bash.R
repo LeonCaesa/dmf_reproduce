@@ -13,11 +13,6 @@ if (length(argv) > 0){
   q_max  <- as.numeric( argv[6] )
 }
 
-
-#Rscript RankVaryNP.R 500 Case2 500 50 6 30
-
-
-#
 repeats = 50
 phi = 2
 family_list = c()
