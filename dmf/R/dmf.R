@@ -297,150 +297,6 @@ mn_deviance <- function (y, mu, wt) {
 }
 
 
-# X_[i, ., j] ~ind MN(w_ij, pi_ij)
-# log(pi_ijl / pi_ijk) = (L_l)_i' * V_j
-# where each L_l is n x q and V is p x q
-# For identifiability, L~ = vec_k(L) is nk x q and has orthogonal columns and
-# V in Stiefel(p, q), that is, L~ has the (incomplete) generalized left vectors
-# up to scale, L~ * V' = U * D * V~' is a SVD.
-
-#' Perform a deviance matrix factorization, for a multinomial tensor.
-#'
-#' @param x Input tensor to be factorized, of dimensions (n x k) x p.
-#' @param rank Decomposition rank.
-#' @param control Algorithm control parameters (see \code{glm.control}).
-#' @return DMF structure, where L is (n x k) x rank and V is p x rank.
-#' @export
-dmf_multinom <- function (x, rank = dim(x)[3],
-                          control = glm.control(epsilon = 1e-6, maxit = 100)) {
-  n <- dim(x)[1]; k <- dim(x)[2] - 1; p <- dim(x)[3]
-  rank <- as.integer(rank)
-
-  # [ initialize ]
-  eta <- array(dim = c(n, k, p))
-  mu <- array(dim = c(n, k, p))
-  wt <- apply(x, c(1, 3), sum) # counts
-  x <- x[, -(k + 1), , drop = FALSE] # remove last level as reference
-  for (i in seq_len(n)) {
-    for (j in seq_len(p)) {
-      mu[i, , j] <- (x[i, , j] + .5) / (1 + wt[i, j] + .5 * k)
-      x[i, , j] <- x[i, , j] / wt[i, j]
-      eta[i, , j] <- log(mu[i, , j]) - log(1 - sum(mu[i, , j]))
-    }
-  }
-  L <- eta[, , 1:rank, drop = FALSE] # V = I_p
-  V <- matrix(nrow = p, ncol = rank)
-  dev <- mn_deviance(x, mu, wt)
-
-  # [ iterate ]
-  for (it in 1:control$maxit) {
-    L <- array(normalize(matrix(L, n * k, rank)), dim = dim(L))
-    for (j in seq_len(p)) {
-      z <- numeric(rank); H <- matrix(0., rank, rank)
-      for (i in seq_len(n)) {
-        xij <- matrix(L[i, ,], nrow = k, ncol = rank); yij <- x[i, , j]
-        etaij <- eta[i, , j]; muij <- mu[i, , j]
-        W <- diag(muij, nrow = k, ncol = k) - tcrossprod(muij)
-        z <- z + wt[i, j] * crossprod(xij, yij - muij + drop(W %*% etaij))
-        H <- H + wt[i, j] * crossprod(xij, W %*% xij)
-      }
-      V[j, ] <- gsym_solve(H, z)
-    }
-
-    V <- normalize(V)
-    for (i in seq_len(n)) {
-      z <- numeric(k * rank); H <- matrix(0., k * rank, k * rank)
-      for (j in seq_len(p)) {
-        xij <- kronecker(diag(k), V[j, , drop = FALSE]); yij <- x[i, , j]
-        etaij <- eta[i, , j]; muij <- mu[i, , j]
-        W <- diag(muij, nrow = k, ncol = k) - tcrossprod(muij)
-        z <- z + wt[i, j] * crossprod(xij, yij - muij + drop(W %*% etaij))
-        H <- H + wt[i, j] * crossprod(xij, W %*% xij)
-      }
-      L[i, ,] <- matrix(gsym_solve(H, z), nrow = k, byrow = TRUE)
-    }
-
-    for (i in seq_len(n)) {
-      etai <- tcrossprod(L[i, ,], V)
-      for (j in seq_len(p)) {
-        muj <- exp(c(etai[, j], 0))
-        mu[i, , j] <- muj[-(k + 1)] / sum(muj)
-      }
-      eta[i, , ] <- etai
-    }
-    dev_new <- mn_deviance(x, mu, wt)
-    if (it > 1 && (dev - dev_new) / (dev + .1) < control$epsilon) break
-    if (control$trace) message("[", it, "] dev = ", dev_new)
-    dev <- dev_new
-    L_old <- L; V_old <- V
-  }
-  # [ orthogonalize ]
-  slv <- svd(tcrossprod(matrix(L_old, n * k, rank), V_old)) # generalized svd
-  L <- array(sweep(slv$u[, 1:rank, drop = FALSE], 2, slv$d[1:rank], `*`), dim = dim(L))
-  V <- slv$v[, 1:rank, drop = FALSE]
-
-  list(L = L, V = V, deviance = dev)
-}
-
-
-
-# [ facilities ]
-svd_rank1update <- function (sx, l, v) {
-  q <- ncol(sx$u) # == ncol(sx$v)
-  nl <- norm2(l); nv <- norm2(v)
-  delta <- nl * nv; l <- l / nl; v <- v / nv
-  ul <- l - sx$u %*% crossprod(sx$u, l); nl <- norm2(ul)
-  uv <- v - sx$v %*% crossprod(sx$v, v); nv <- norm2(uv)
-
-  B <- delta * tcrossprod(c(crossprod(sx$u, l), nl),
-                          c(crossprod(sx$v, v), nv))
-  diag(B)[1:q] <- diag(B)[1:q] + sx$d[1:q]
-  sb <- svd(B)
-  list(d = sb$d,
-       u = cbind(sx$u, ul / nl) %*% sb$u,
-       v = cbind(sx$v, uv / nv) %*% sb$v)
-}
-
-#' Increases the rank of a DMF.
-#'
-#' @param dx DMF structure for x of rank q.
-#' @param x The matrix that was partially decomposed.
-#' @param adjust_svd Should the DMF be orthogonalized after increasing rank?
-#' @param maxit Maximum number of iterations for rank-one offset DMF.
-#' @param ... Other parameters?
-#' @return DMF structure for x of rank q + 1.
-#' @export
-dmf_rank1update <- function (dx, x, adjust_svd = FALSE, maxit = 100, refine = TRUE, ...) {
-  dx1 <- dmf(x, rank = 1, offset = tcrossprod(dx$L, dx$V), family = dx$family,
-             weights = dx$prior.weights,
-             control = glm.control(maxit = maxit), ...)
-  # [changed to vecorized operation for rank 1 extension]
-  # dx1 <- dmf_extend(x, dx$family,
-  #                   origin_rank = ncol(dx$L),
-  #                   extend_rank = ncol(dx$L) + 1, offset = tcrossprod(dx$L, dx$V),
-  #                   weights = dx$prior.weights, control = glm.control(maxit = maxit))
-
-  if (adjust_svd) {
-    D <- apply(dx$L, 2, norm2)
-    ds <- list(d = D, u = sweep(dx$L, 2, D, `/`), v = dx$V) %>%
-      svd_rank1update(dx1$L, dx1$V) # adjust
-    dx1$L <- sweep(ds$u, 2, ds$d, `*`)
-    dx1$V <- ds$v
-  } else {
-    dx1$L <- cbind(dx$L, dx1$L)
-    dx1$V <- cbind(dx$V, dx1$V)
-  }
-  if(refine){
-    return(dmf(x, rank = ncol(dx1$L), family = dx$family,
-               weights = dx$prior.weights, start = dx1)) # refine
-  }else{
-    return(dx1)
-  }
-
-}
-
-
-
 dmf_fitted <- function (lv, r = ncol(lv$L), subset = seq_len(nrow(lv$L)),
                         linear = FALSE) {
   eta <- tcrossprod(lv$L[subset, 1:r, drop = FALSE],
@@ -472,6 +328,23 @@ dmf_aic <- function (lv, scale = 2) {
   scale * ((n + p) * q - q ^ 2) + lv$deviance
 }
 
+#' Conduct force-sign SVD given eta and desired rank q
+#' @param eta Input matrix to conduct force-sign svd.
+#' @param q designed rank of the force-sign svd.
+#' @export
+dmf_identify <- function(eta, q){
+
+  svd_eta <- svd(eta, nu = q, nv = q)
+  negative_flag <- c(1:q)[svd_eta$v[1,]<0]
+
+  svd_eta$u[,negative_flag] <- matrix(-svd_eta$u[,negative_flag])
+  svd_eta$v[,negative_flag] <- matrix(-svd_eta$v[,negative_flag])
+  # [dmf identify l.v]
+  V <- svd_eta$v
+  L <- tcrossprod(svd_eta$u, diag(svd_eta$d[1:q]))
+  return (list(L = L, V = V))
+}
+
 
 
 generate_Y <- function (glm_family, eta_star, phi = 1, glm_weights = 1) {
@@ -483,7 +356,6 @@ generate_Y <- function (glm_family, eta_star, phi = 1, glm_weights = 1) {
               gaussian = rnorm(y_len, mu, sqrt(phi)),
               poisson = rpois(y_len, mu),
               binomial = rbinom(y_len, glm_weights, mu),
-              #Gamma = rgamma(y_len ,shape = phi, scale = mu / phi),
               Gamma = rgamma(y_len ,shape = 1/phi, scale = mu  * phi), # var(data) = phi * mu^2
               negative.binomial = rnegbin(y_len, mu = mu, theta = phi),
               stop("family `", glm_family$family, "` not recognized"))
@@ -498,7 +370,7 @@ generate_Y <- function (glm_family, eta_star, phi = 1, glm_weights = 1) {
 #' @param G number of groups for eta to be partitioned
 #' @param weights Entrywise weight.
 #' @param offset Entrywise offset.
-#' @param dispersion If cutomized dispersion is provided
+#' @param dispersion If customized dispersion is provided
 #' @export
 family_test <- function (x, lv, G, weights = 1, offset = zeros(x), dispersion = NULL) {
 
@@ -527,9 +399,6 @@ family_test <- function (x, lv, G, weights = 1, offset = zeros(x), dispersion = 
 
   G <- as.integer(G)
   if (G > n*p) stop('fewer observations than groups of partition')
-
-  #if (endsWith(lv$family$family,'binomial')) x <- x / weights
-
   if (!is.null(dispersion)){
     phi_hat <- dispersion
   }else{
@@ -547,8 +416,6 @@ family_test <- function (x, lv, G, weights = 1, offset = zeros(x), dispersion = 
   }
   eta_hat <- data.frame(eta = c(lv$family$linkfun(mu_hat)))
   cut_quantle <- seq(0, 1, 1 / G)
-  # TODO: remove magrittr dependency
-  #     : warning on num cut less than G
   eta_g <- eta_hat %>% group_by() %>% mutate(G = cut(eta, unique(quantile(eta, cut_quantle)),
                                                     include.lowest = TRUE))
   eta_g$G <- as.numeric(as.factor(eta_g$G))
@@ -630,30 +497,34 @@ act_rank <- function(x, family = gaussian(), weights = 1, offset = zeros(x)) {
 
 
 #' Conduct factorization rank selection based upon maximum eigenvalue gap
-#' Onatski(2010). Algorithm first fit dmf with rank = q_max then conduct eigen
+#' Onatski(2010). Algorithm first fit dmf with rank = q_max then conduct igen
 #' gap search on the covariance of fitted eta
 #' @param x Input matrix to be factorized.
 #' @param family Family object to specify deviance loss.
 #' @param q_max Maximum rank eta.
 #' @param weights Entrywise weight.
 #' @param offset Entrywise offset.
-#' @param max_iter Maximum iteration.
-#' @param fit_full Fit eta with full rank matrix? Always recommended if computation speed is permitted
+#' @param max_iter Maximum iteration of local linear regression to determine q_hat.
+#' @param fit_rank The DMF rank q used to estimate eta, plotting on lambda_hat is recommended for rank determination instead of looking at q_hat returned.
 #' @export
 onatski_rank <- function(x, family, q_max, weights = 1, offset = zeros(x),
-                            max_iter = 10, fit_full = FALSE) {
+                            max_iter = 10, fit_rank = NULL) {
   n <- nrow(x); p <- ncol(x)
   if (p < q_max + 5 ) stop('decrease rmax')
 
-  if(fit_full){fit_result <- dmf(x, family, rank= p, weights, offset)
-  }else{fit_result <- dmf(x, family, rank= q_max, weights, offset)  }
-
+  if (is.null(fit_rank)){
+    fit_result <- dmf(x, family, rank= p, weights, offset)
+  }else{
+    if (fit_rank > q_max) stop('decrease fit_rank')
+    print( 'Estimating dmf eta with smaller rank. Returned q_hat might be incorrect. Plotting on lambda_hats is required')
+    fit_result <- dmf(x, family, rank= fit_rank, weights, offset)
+  }
   eta <- tcrossprod(fit_result$L, fit_result$V)
   cov_matrix <- cov(eta)
   lambda_hats <- eigen(cov_matrix)$value
   tol <- Inf
   j_update <- q_max + 1
-  while (tol>=1){
+  while (tol >= 1){
     j <- j_update
     y_reg <- lambda_hats[j:(j+4)]
     x_reg <- (j + seq(-1, 3, 1))^(2/3)
@@ -663,164 +534,77 @@ onatski_rank <- function(x, family, q_max, weights = 1, offset = zeros(x),
     j_update <- q_hat + 1
     tol <- abs(j_update -j)
   }
+  return (list(q_hat = q_hat, delta = delta_temp, L =fit_result$L,
+               V = fit_result$V, lambda_hats = lambda_hats,
+               deviance = fit_result$deviance, family = fit_result$family))
+}
+
+
+#' Conduct fast factorization rank selection based upon gaussian approximated onaksi maximum-eigen gap result.
+#' Onatski(2010). Algorithm first estimate eta via g(x) with numerical overflow and underflow.
+#' @param x Input matrix to be factorized.
+#' @param family Family object to specify deviance loss.
+#' @param q_max Maximum rank eta.
+#' @param weights Entrywise weight.
+#' @param offset Entrywise offset.
+#' @param max_iter Maximum iteration.
+#' @export
+onatski_gaussapprox <- function(x, family = gaussian(), q_max, weights =1,
+                               offset= zeros(x), max_iter =10){
+  n <- nrow(x); p <- ncol(x); d = ncol(x)
+  if (n < p) stop("fewer observations than predictors")
+  if (length(weights) == 1)
+    weights <- rep(weights, n * p)
+  else {
+    if (is.vector(weights)) {
+      if (length(weights) != n)
+        stop("inconsistent number of weights")
+      else
+        weights <- rep(weights, p)
+    } else {
+      if (nrow(weights) != n && ncol(weights) != p)
+        stop("inconsistent number of weights")
+    }
+  }
+  valid <- (weights > 0) & (!is.na(x))
+  if (any(apply(!valid, 1, all)) || any(apply(!valid, 2, all)))
+    stop("full row or column with zero weights or missing values")
+
+  eta_gaussapprox <- family$linkfun(x/weights)
+  # [cap inf with valid value]
+  cap_maximum <- max(eta_gaussapprox[which(eta_gaussapprox < Inf)])
+  cap_minimum <- min(eta_gaussapprox[which(eta_gaussapprox > -Inf)])
+  eta_gaussapprox[eta_gaussapprox == Inf] <- cap_maximum
+  eta_gaussapprox[eta_gaussapprox == -Inf] <- cap_minimum
+  # [interpolate invalid value with mean]
+  if (sum(is.na(eta_gaussapprox))!=0) {
+    warning("NA produced in g(Y) transformation, imputing with mean")
+    eta_gaussapprox[is.na(eta_gaussapprox)] = mean(eta_gaussapprox, na.rm =TRUE)
+  }
+
+  fit_result = svd(eta_gaussapprox, nu = p, nv = p)
+  fit_result$L =sweep(fit_result$u, 2, fit_result$d, '*')
+  fit_result$V = fit_result$v
+  eta = tcrossprod(fit_result$L, fit_result$V)
+  cov_matrix = cov(eta)
+  lambda_hats = eigen(cov_matrix)$value
+  tol = Inf
+  j_update = q_max + 1
+  while (tol>=1){
+    j <- j_update
+    y_reg <- lambda_hats[j:(j+4)]
+    x_reg <- (j + seq(-1, 3, 1))^(2/3)
+    delta_temp <- as.numeric(2 * abs(coef(lm(y_reg ~ x_reg))))[2]
+    flag <- which(-diff(lambda_hats)>= delta_temp)
+    if(length(flag) == 0){q_hat = 0}else{q_hat <- tail(flag[flag<=q_max],1)}
+    j_update <- q_hat + 1
+    tol <- abs(j_update -j)
+  }
 
   return (list(q_hat = q_hat, delta = delta_temp, L =fit_result$L,
                V = fit_result$V, deviance = fit_result$deviance, family = fit_result$family))
-}
-
-#' Conduct force-sign SVD given eta and desired rank q
-#' @param eta Input matrix to conduct force-sign svd.
-#' @param q designed rank of the force-sign svd.
-#' @export
-dmf_identify <- function(eta, q){
-
-  svd_eta <- svd(eta, nu = q, nv = q)
-  negative_flag <- c(1:q)[svd_eta$v[1,]<0]
-
-  svd_eta$u[,negative_flag] <- matrix(-svd_eta$u[,negative_flag])
-  svd_eta$v[,negative_flag] <- matrix(-svd_eta$v[,negative_flag])
-  # [dmf identify l.v]
-  V <- svd_eta$v
-  L <- tcrossprod(svd_eta$u, diag(svd_eta$d[1:q]))
-  return (list(L = L, V = V))
-}
-
-
-#' extend rank from q to an arbitrary rank `\tilde{q}` through offset = eta_q
-#' @param dx dmf rank q fit result
-#' @param x Input matrix to be factorized.
-#' @param adjust_svd Todo:fixme.
-#' @param refine boolen to indicate whether or not to refine rank q + 1 fit `\Lambda` V^T
-#' @param control Algorithm control parameters (see \code{glm.control}).
-#' @return Extended DMF structure.
-#' @export
-dmf_rank1update <- function (dx, x, adjust_svd = FALSE, refine = TRUE, control = glm.control(epsilon = 1e-6, maxit = 100), ...) {
-
-  # [can changed to vectorized operation for rank 1 extension]
-  dx1 <- dmf(x, rank = 1, offset = tcrossprod(dx$L, dx$V), family = dx$family,
-             weights = dx$prior.weights,
-             control = control, ...)
-
-  if (adjust_svd) {
-    D <- apply(dx$L, 2, norm2)
-    ds <- list(d = D, u = sweep(dx$L, 2, D, `/`), v = dx$V) %>%
-      svd_rank1update(dx1$L, dx1$V) # adjust
-    dx1$L <- sweep(ds$u, 2, ds$d, `*`)
-    dx1$V <- ds$v
-  } else {
-    dx1$L <- cbind(dx$L, dx1$L)
-    dx1$V <- cbind(dx$V, dx1$V)
-  }
-  if(refine){
-    return(dmf(x, rank = ncol(dx1$L), family = dx$family,
-               weights = dx$prior.weights, start = dx1)) # refine
-  }else{
-    return(dx1)
-  }
 
 }
 
-dmf_extend <- function (x, dx, extend_rank = rank + 1, adjust_svd = FALSE,
-                        refine = FALSE, control = glm.control(epsilon = 1e-6, maxit = 100)
-                        ){
 
-  # [ some definition inherited from offset dx fit]
-  n <- nrow(x); p <- ncol(x); origin_rank <- ncol(dx$L);
-  family <- dx$family; weights <- dx$prior.weights
-  offset <- tcrossprod(dx$L, dx$V)
-  rank <- extend_rank -origin_rank
-
-  # [ no need for checking since everything is inherited from dx]
-  valid <- (weights > 0) & (!is.na(x))
-
-  # [ initialize ]
-  mu <- family_initialize(x, weights, family)
-  eta <- family$linkfun(mu)
-
-  #[transformation from init can gets negative]
-  # valid <- valid & family$valideta(eta) ?
-
-  eta[!valid] <- mu[!valid] <- 0
-  L <- (eta - offset)[, 1:rank, drop = FALSE] # V = I_p
-  V <- matrix(nrow = p, ncol = rank)
-
-  # [ iterate ]
-  for (it in 1:control$maxit) {
-      mu_eta <- matrix(family$mu.eta(eta), nrow = n, ncol = p)
-      var <- matrix(family$variance(mu), nrow = n, ncol = p)
-      # W = mu_eta / var * (x - mu) * weights
-      is_inf_mu <- is.infinite(mu)
-      S <- mu_eta / var * mu_eta * weights
-      S[is_inf_mu] <- 0
-      Z <- eta - offset + (x - mu) / mu_eta # working residuals
-      Z[is_inf_mu] <- eta[is_inf_mu] - offset[is_inf_mu]
-      Z[!valid] <- 0
-
-      # [efficient vectorization for extend rank 1]
-      if (rank == 1){
-          # [V step]
-          left <- colSums(sweep(sqrt(S), 1, L, "*")^2)
-          right <- colSums(sweep(S * Z, 1, L, "*"))
-          V <- right/left
-          # [L step]
-          left <- rowSums(sweep(sqrt(S), 2, V, "*")^2)
-          right <- rowSums(sweep(S * Z, 2, V, "*"))
-          L <- right/left
-      }else{
-      # [iteration over n,p for extend rank d]
-          L <- normalize(L)
-          for (j in 1:p) {
-            aj <- valid[, j]
-            sj <- sqrt(S[, j]); Lj <- sweep(L, 1, sj, `*`)[aj, , drop = FALSE]
-            V[j, ] <- gsym_solve(crossprod(Lj), crossprod(Lj, (Z[, j] * sj)[aj]))
-          }
-          V <- normalize(V)
-          for (i in 1:n) {
-            ai <- valid[i, ]
-            si <- sqrt(S[i, ]); Vi <- sweep(V, 1, si, `*`)[ai, , drop = FALSE]
-            L[i, ] <- gsym_solve(crossprod(Vi), crossprod(Vi, (Z[i, ] * si)[ai]))
-          }
-      }
-      eta <- tcrossprod(L, V) + offset
-      mu <- family$linkinv(eta)
-      dr <- family$dev.resids(x[valid], mu[valid], weights[valid])
-      dr[is.na(dr) | is.nan(dr)] <- 0
-      dev_new <- sum(dr)
-      # if (it > 1 && (dev - dev_new) / (dev + .1) < control$epsilon) break
-      if (it > 2 && (dev - dev_new) / (dev + .1) < control$epsilon) break
-      if (control$trace) message("[", it, "] dev = ", dev_new)
-      dev <- dev_new
-      # print(dev_new)
-      L_old <- L; V_old <- V
-  }
-
-  # [identify the results]
-  dx1  <- dx; dx1$deviance <- dev; dx1$iter <- it
-  if (adjust_svd) {
-    # TODO: [projection with dimension d]
-    # etaq = dmf_identify(offset, origin_rank)
-    # LL_diag = diag(crossprod(etaq$L))
-    # L = L_old - etaq$L %*% (1/LL_diag * crossprod(etaq$L, L_old))
-    # V = V_old - t(tcrossprod(crossprod(V_old, etaq$V), etaq$V))
-    # list(L = etaq_identified$L, V = etaq_identified$V, deviance = dev, family = family)
-
-    # [needs to study Luis's efficient projection]
-    # D <- apply(dx$L, 2, norm2)
-    # ds <- list(d = D, u = sweep(dx$L, 2, D, `/`), v = dx$V) |>
-    #   svd_rank1update(dx1$L, dx1$V) # adjust
-    # dx1$L <- sweep(ds$u, 2, ds$d, `*`)
-    # dx1$V <- ds$v
-  } else {
-    L_old <- cbind(dx$L, L_old)
-    V_old <- cbind(dx$V, V_old)
-    ql <- qr(L_old); qv <- qr(V_old)
-    sr <- svd(tcrossprod(qr.R(ql), qr.R(qv)))
-    L <- qr.Q(ql) %*% sweep(sr$u, 2, sr$d, `*`)
-    V <- qr.Q(qv) %*% sr$v
-    dx1$L <- L; dx1$V <- V
-  }
-  if(refine){
-    return(dmf(x, rank = ncol(dx1$L), family = dx$family, weights = dx$prior.weights, start = dx1)) # refine
-  }else{return(dx1)}
-}
 

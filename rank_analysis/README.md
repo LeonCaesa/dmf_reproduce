@@ -15,4 +15,3 @@ Example run:
 ``` 
  Rscript ./rank_bash.R ${nsim} ${case} ${n} ${p} ${q_star} ${q_max}
 ```
-
